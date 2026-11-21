@@ -69,9 +69,14 @@ public final class ViaProxyChatPlugin extends ViaProxyPlugin {
 
     private void openDatabase() {
         try {
+            // ViaProxy loads plugins with its own class loader. Explicitly initialize
+            // the bundled JDBC driver instead of relying on DriverManager's
+            // ServiceLoader discovery, which may not see plugin-local services.
+            Class.forName("org.sqlite.JDBC", true, getClass().getClassLoader());
             Path directory = Path.of("plugins", "NekoGate");
             Files.createDirectories(directory);
-            this.database = DriverManager.getConnection("jdbc:sqlite:" + directory.resolve("bans.sqlite3"));
+            String databaseUrl = "jdbc:sqlite:" + directory.resolve("bans.sqlite3");
+            this.database = DriverManager.getConnection(databaseUrl);
             try (Statement statement = this.database.createStatement()) {
                 statement.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS bans (
