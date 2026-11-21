@@ -189,4 +189,6 @@ cargo run --release -- --log-level DEBUG
 
 ## 许可证
 
-请以仓库中的许可证文件为准。ViaProxy、ViaVersion、Minecraft 及其相关商标和项目归各自权利人所有；本项目不代表 Mojang 或 Microsoft。
+NekoProxy 项目中由贡献者编写的原创代码采用 **MIT License**。这包括项目自身的 Rust 代码及自行编写的 ViaProxy 插件代码。
+
+ViaProxy、ViaVersion 和其他第三方依赖不因本声明而改变其原有许可证，仍分别遵循各自的许可条款。Minecraft 及相关商标和知识产权归其各自权利人所有；本项目与 Mojang 或 Microsoft 无隶属关系。
