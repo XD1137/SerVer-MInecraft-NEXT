@@ -48,6 +48,9 @@ final class PlayerActivityPacketHandler extends PacketHandler {
     private volatile Double z;
     private volatile Float yaw;
     private volatile Float pitch;
+    private volatile Instant loginAttemptAt;
+    private volatile long loginDiagnosticPackets;
+    private volatile long loginDiagnosticBytes;
 
     PlayerActivityPacketHandler(PlayerActivityLogger logger, ProxyConnection connection, NekoGateApiImpl extensionApi) {
         super(connection);
@@ -138,6 +141,7 @@ final class PlayerActivityPacketHandler extends PacketHandler {
                     removeBackendPlayerNames(unknown.data);
                 }
             }
+            logLoginDiagnosticPacket(type, unknown.packetId, unknown.data == null ? 0 : unknown.data.length, serverProtocol);
             if (type == MCPackets.S2C_PLAYER_CHAT) {
                 unknown.data = rewritePlayerChat(unknown.data, serverProtocol);
                 logRawServerChat(unknown.data, serverProtocol);
@@ -155,6 +159,8 @@ final class PlayerActivityPacketHandler extends PacketHandler {
             String player = playerName();
             if (player != null && this.joined.compareAndSet(false, true)) {
                 this.joinedAt = Instant.now();
+                logLoginDiagnostic("LOGIN_ACCEPTED", "server profile established; packets=" + this.loginDiagnosticPackets
+                        + " bytes=" + this.loginDiagnosticBytes);
                 publish(new NekoGateEvents.PlayerJoin(Instant.now(), apiPlayer()));
                 logJoinIfReady();
             }
@@ -168,6 +174,10 @@ final class PlayerActivityPacketHandler extends PacketHandler {
 
         String player = playerName();
         if (player == null) return;
+        if (this.loginAttemptAt != null) {
+            logLoginDiagnostic("CONNECTION_CLOSED", "packets=" + this.loginDiagnosticPackets
+                    + " bytes=" + this.loginDiagnosticBytes);
+        }
         publish(new NekoGateEvents.PlayerQuit(Instant.now(), apiPlayer()));
         if (this.joinLogged.compareAndSet(false, true)) {
             this.logger.logJoin(player, playerUuid(), start, this.dimension, this.x, this.y, this.z, this.yaw, this.pitch);
@@ -500,14 +510,57 @@ final class PlayerActivityPacketHandler extends PacketHandler {
             }
 
             String command = value.startsWith("/") ? value : "/" + value;
-            this.logger.logCommand(player, playerUuid(), command);
-            publish(new NekoGateEvents.Command(Instant.now(), apiPlayer(), command));
+            String safeCommand = safeCommandForLog(command);
+            this.logger.logCommand(player, playerUuid(), safeCommand);
+            publish(new NekoGateEvents.Command(Instant.now(), apiPlayer(), safeCommand));
+            markLoginAttempt(command);
             logWhisperCommand(player, playerUuid(), command);
             return this.extensionApi == null || !this.extensionApi.dispatchCommand(apiPlayer(), command);
         } catch (RuntimeException ignored) {
             // Malformed or version-specific payloads must never affect packet forwarding.
             return true;
         }
+    }
+
+    private void markLoginAttempt(String command) {
+        if (command == null || !command.stripLeading().matches("(?i)^/?login(?:\\s+.*)?$")) return;
+        this.loginAttemptAt = Instant.now();
+        this.loginDiagnosticPackets = 0;
+        this.loginDiagnosticBytes = 0;
+        logLoginDiagnostic("LOGIN_COMMAND", "command received; arguments redacted; clientProtocol="
+                + this.proxyConnection.getClientVersion().getVersion()
+                + " serverProtocol=" + this.proxyConnection.getServerVersion().getVersion());
+    }
+
+    private static String safeCommandForLog(String command) {
+        if (command != null && command.stripLeading().matches("(?i)^/?login(?:\\s+.*)?$")) {
+            return "/login <redacted>";
+        }
+        return command;
+    }
+
+    private void logLoginDiagnosticPacket(MCPackets type, int packetId, int bytes, int serverProtocol) {
+        Instant started = this.loginAttemptAt;
+        if (started == null) return;
+        long count = ++this.loginDiagnosticPackets;
+        this.loginDiagnosticBytes += bytes;
+        if (count <= 250 || count % 100 == 0) {
+            String packetName = type == null ? "UNKNOWN" : type.name();
+            logLoginDiagnostic("S2C_PACKET", "index=" + count + " type=" + packetName
+                    + " id=0x" + Integer.toHexString(packetId) + " bytes=" + bytes
+                    + " totalBytes=" + this.loginDiagnosticBytes
+                    + " elapsedMs=" + (System.currentTimeMillis() - started.toEpochMilli())
+                    + " serverProtocol=" + serverProtocol);
+        }
+    }
+
+    private void logLoginDiagnostic(String event, String details) {
+        String player = playerName();
+        System.err.println("[NekoGate][LOGIN-DIAG] time=" + Instant.now()
+                + " event=" + event + " player=" + (player == null ? "<unknown>" : player)
+                + " client=" + this.proxyConnection.getClientVersion().getVersion()
+                + " server=" + this.proxyConnection.getServerVersion().getVersion()
+                + " " + details);
     }
 
     private void updateMovement(MCPackets type, byte[] data) {
