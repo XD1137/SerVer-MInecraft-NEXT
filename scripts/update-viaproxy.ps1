@@ -60,15 +60,56 @@ try {
     New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
     $jarPath = Join-Path $TempRoot $asset.name
     Write-Host "[ViaProxy] 正在下载 $($asset.name)..."
-    # Use WebClient instead of Invoke-WebRequest: Windows PowerShell 5.1's
-    # response parser can throw IndexOutOfRangeException on some GitHub CDN responses.
+    # Stream the release asset with HttpWebRequest so PowerShell 5.1 does not
+    # invoke its fragile web response parser, and report real download progress.
     $downloadSucceeded = $false
     $lastDownloadError = $null
     for ($attempt = 1; $attempt -le 3 -and -not $downloadSucceeded; $attempt++) {
-        $webClient = New-Object System.Net.WebClient
+        $response = $null
+        $inputStream = $null
+        $outputStream = $null
         try {
-            $webClient.Headers.Add('User-Agent', $Headers['User-Agent'])
-            $webClient.DownloadFile([Uri]$asset.browser_download_url, $jarPath)
+            $request = [System.Net.HttpWebRequest]::Create([Uri]$asset.browser_download_url)
+            $request.Method = 'GET'
+            $request.UserAgent = $Headers['User-Agent']
+            $request.AllowAutoRedirect = $true
+            $request.Timeout = 30000
+            $request.ReadWriteTimeout = 30000
+
+            $response = $request.GetResponse()
+            $totalBytes = $response.ContentLength
+            $inputStream = $response.GetResponseStream()
+            $outputStream = [System.IO.File]::Create($jarPath)
+            $buffer = New-Object byte[] (64 * 1024)
+            $downloadedBytes = [long]0
+            $lastProgressUpdate = [DateTime]::UtcNow
+
+            while (($bytesRead = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $outputStream.Write($buffer, 0, $bytesRead)
+                $downloadedBytes += $bytesRead
+
+                # Throttle console updates while keeping the progress bar responsive.
+                if ((([DateTime]::UtcNow - $lastProgressUpdate).TotalMilliseconds -ge 150) -or ($totalBytes -gt 0 -and $downloadedBytes -ge $totalBytes)) {
+                    $downloadedMb = $downloadedBytes / 1MB
+                    if ($totalBytes -gt 0) {
+                        $totalMb = $totalBytes / 1MB
+                        $percent = [int][Math]::Min(100, [Math]::Floor(($downloadedBytes * 100.0) / $totalBytes))
+                        Write-Progress -Activity "[ViaProxy] 下载 $($asset.name)" -Status ('{0:N1} / {1:N1} MB' -f $downloadedMb, $totalMb) -PercentComplete $percent
+                    } else {
+                        Write-Progress -Activity "[ViaProxy] 下载 $($asset.name)" -Status ('已下载 {0:N1} MB' -f $downloadedMb)
+                    }
+                    $lastProgressUpdate = [DateTime]::UtcNow
+                }
+            }
+
+            $outputStream.Flush()
+            $outputStream.Dispose()
+            $outputStream = $null
+            $inputStream.Dispose()
+            $inputStream = $null
+            $response.Dispose()
+            $response = $null
+            Write-Progress -Activity "[ViaProxy] 下载 $($asset.name)" -Completed
 
             if (-not (Test-Path $jarPath -PathType Leaf)) {
                 throw '下载请求结束，但目标文件不存在。'
@@ -91,7 +132,10 @@ try {
                 Start-Sleep -Seconds 3
             }
         } finally {
-            $webClient.Dispose()
+            Write-Progress -Activity "[ViaProxy] 下载 $($asset.name)" -Completed
+            if ($outputStream) { $outputStream.Dispose() }
+            if ($inputStream) { $inputStream.Dispose() }
+            if ($response) { $response.Dispose() }
         }
     }
 
