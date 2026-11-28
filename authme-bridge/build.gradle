@@ -24,10 +24,3 @@ tasks.withType(JavaCompile).configureEach {
 jar {
     archiveFileName = 'nekogate-authme-bridge.jar'
 }
-
-// Copy the runnable companion plugin to the shared runtime plugin directory.
-tasks.register('installBridge', Copy) {
-    dependsOn tasks.named('build')
-    from(tasks.named('jar'))
-    into new File(project.projectDir.parentFile, 'plugins')
-}
