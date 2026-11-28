@@ -26,6 +26,15 @@ jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    } {
+        // Dependency signatures become invalid when their classes/resources are
+        // merged into this plugin JAR. Remove signature metadata from dependencies.
+        exclude 'META-INF/*.SF'
+        exclude 'META-INF/*.DSA'
+        exclude 'META-INF/*.RSA'
+        exclude 'META-INF/*.EC'
+        exclude 'META-INF/SIG-*'
+        exclude 'META-INF/INDEX.LIST'
     }
 }
 
