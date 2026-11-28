@@ -2,16 +2,13 @@ plugins { id 'java' }
 group = 'cn.mits'
 version = '1.1.0'
 
-// Compile against Java 17 APIs without requiring a separate JDK 17 toolchain.
 repositories {
     mavenCentral()
     maven { name = 'ViaVersion'; url = 'https://repo.viaversion.com/everything' }
 }
 
 dependencies {
-    // ViaProxy supplies the runtime API; it must not be bundled into the plugin.
     compileOnly('net.raphimc:ViaProxy:3.4.14') { transitive = false }
-    // Bundle SQLite JDBC and its native libraries so the plugin is self-contained.
     implementation('org.xerial:sqlite-jdbc:3.50.3.0')
 }
 
@@ -39,10 +36,13 @@ tasks.named('build') {
     dependsOn tasks.named('apiJar')
 }
 
-// Install only the runnable ViaProxy plugin. The API-only JAR is kept in
-// build/libs for extension developers and must not be loaded as a plugin.
+// Install only the runnable ViaProxy tunnel plugin.
+// Remove the obsolete Bukkit/Spigot bridge JAR from earlier builds.
 tasks.register('installPlugin', Copy) {
     dependsOn tasks.named('build')
+    doFirst {
+        delete new File(project.projectDir.parentFile, 'plugins/nekogate-authme-bridge.jar')
+    }
     from(tasks.named('jar'))
     into new File(project.projectDir.parentFile, 'plugins')
 }
